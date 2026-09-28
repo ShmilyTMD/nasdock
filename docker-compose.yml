@@ -1,0 +1,17 @@
+services:
+  nasdock:
+    build:
+      context: ./source      # 或使用镜像（见下方说明）
+      dockerfile: Dockerfile
+    image: nasdock:latest
+    container_name: nasdock
+    restart: unless-stopped
+    ports:
+      - "7788:8000"
+    environment:
+      TZ: Asia/Shanghai
+      WEB_TOKEN: "change-me-to-a-random-secret"   # 访问令牌，务必修改
+    volumes:
+      - ./config:/config
+      # 只读挂载 docker.sock：自动扫描容器所需
+      - /var/run/docker.sock:/var/run/docker.sock:ro

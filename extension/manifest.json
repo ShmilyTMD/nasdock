@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "NASDock 新标签页",
+  "version": "1.0.0",
+  "description": "打开新标签页时自动显示你的 NASDock 主页",
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "host_permissions": [
+    "http://YOUR_NAS_IP:7788/*"
+  ]
+}

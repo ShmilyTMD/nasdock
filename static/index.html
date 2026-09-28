@@ -1,0 +1,920 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NASDock</title>
+<script>
+/* 访问令牌引导：?token=xxx 自动保存；401 弹窗输入 */
+(function () {
+  function getToken() { try { return localStorage.getItem('nasdock_token') || ''; } catch (e) { return ''; } }
+  function syncCookie(t) { if (t) document.cookie = 'nasdock_token=' + encodeURIComponent(t) + '; path=/; max-age=31536000; SameSite=Strict'; }
+  window.ndGetToken = getToken;
+  window.ndSaveToken = function (t) { try { localStorage.setItem('nasdock_token', t); } catch (e) {} syncCookie(t); };
+  syncCookie(getToken());
+  try {
+    var q = new URLSearchParams(location.search);
+    if (q.get('token')) { ndSaveToken(q.get('token').trim()); q.delete('token');
+      history.replaceState({}, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash); }
+  } catch (e) {}
+  var of = window.fetch;
+  window.fetch = function (input, init) {
+    var t = getToken();
+    if (t) {
+      if (input instanceof Request) { input = new Request(input); input.headers.set('X-Web-Token', t); }
+      else { init = init || {}; init.headers = new Headers(init.headers || {}); init.headers.set('X-Web-Token', t); }
+    }
+    return of(input, init).then(function (r) {
+      if (r.status === 401 && !window.__ndAsk) {
+        window.__ndAsk = true;
+        var t2 = prompt('NASDock 已开启访问控制，请输入访问令牌（见容器启动日志或 compose）');
+        window.__ndAsk = false;
+        if (t2 && t2.trim()) { ndSaveToken(t2.trim()); location.reload(); }
+      }
+      return r;
+    });
+  };
+})();
+</script>
+<style>
+:root {
+  --accent: #4f8cff;
+  --accent2: #7aa5ff;
+  --text: #eef2fb;
+  --muted: rgba(238,242,251,.62);
+  --card: rgba(17, 24, 39, .55);
+  --card-hover: rgba(23, 33, 54, .72);
+  --line: rgba(255,255,255,.09);
+  --shadow: 0 10px 30px rgba(0,0,0,.35);
+  --radius: 16px;
+}
+html.light {
+  --text: #1a2233;
+  --muted: rgba(26,34,51,.60);
+  --card: rgba(255,255,255,.66);
+  --card-hover: rgba(255,255,255,.85);
+  --line: rgba(20,30,60,.10);
+  --shadow: 0 10px 30px rgba(30,50,90,.16);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { min-height: 100%; }
+body {
+  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  color: var(--text);
+  background: #0d1220;
+  min-height: 100vh;
+  position: relative;
+}
+#wall {
+  position: fixed; inset: 0; z-index: -2;
+  background-size: cover; background-position: center;
+  transition: opacity .4s ease;
+}
+#wall::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(8,12,22,.55), rgba(8,12,22,.72));
+}
+html.light #wall::after { background: linear-gradient(180deg, rgba(255,255,255,.38), rgba(240,244,255,.55)); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 22px 60px; }
+
+/* 顶栏 */
+.top { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; letter-spacing: .5px; }
+.logo .dot { width: 12px; height: 12px; border-radius: 4px; background: linear-gradient(135deg, var(--accent), #7ee0ff); box-shadow: 0 0 14px rgba(79,140,255,.8); }
+.spacer { flex: 1; }
+.iconbtn {
+  width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); cursor: pointer; font-size: 17px;
+  display: grid; place-items: center; transition: .18s; backdrop-filter: blur(12px);
+}
+.iconbtn:hover { transform: translateY(-2px); background: var(--card-hover); }
+
+/* 时钟 + 搜索 */
+.hero { text-align: center; padding: 26px 0 34px; }
+#clock { font-size: 62px; font-weight: 200; letter-spacing: 2px; line-height: 1; text-shadow: 0 4px 24px rgba(0,0,0,.35); font-variant-numeric: tabular-nums; }
+#date { margin-top: 10px; color: var(--muted); font-size: 14px; }
+.search {
+  margin: 26px auto 0; max-width: 640px; display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: 7px 8px 7px 18px; backdrop-filter: blur(16px); box-shadow: var(--shadow);
+  position: relative; z-index: 30;
+}
+.search:focus-within { border-color: rgba(79,140,255,.65); box-shadow: 0 0 0 4px rgba(79,140,255,.15), var(--shadow); }
+.search input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 15px; }
+.search input::placeholder { color: var(--muted); }
+.edrop { position: relative; flex-shrink: 0; }
+.ebtn {
+  display: flex; align-items: center; gap: 7px; border: 0; cursor: pointer;
+  background: rgba(127,150,200,.14); color: var(--text); border-radius: 999px;
+  padding: 8px 12px; font-size: 12.5px; font-family: inherit; transition: .15s;
+}
+.ebtn:hover { background: rgba(127,150,200,.26); }
+.ebtn img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
+.ebtn .car { font-size: 9px; opacity: .7; }
+.emenu {
+  position: absolute; top: calc(100% + 10px); left: 0; min-width: 170px;
+  background: rgba(24, 32, 50, .98); border: 1px solid var(--line); border-radius: 14px;
+  padding: 6px; display: none; z-index: 40; box-shadow: var(--shadow);
+}
+html.light .emenu { background: rgba(255,255,255,.99); }
+.edrop.open .emenu { display: block; }
+.eitem {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px;
+  border: 0; background: transparent; color: var(--text); border-radius: 9px;
+  cursor: pointer; font-size: 13px; text-align: left; font-family: inherit;
+}
+.eitem:hover { background: rgba(79,140,255,.18); }
+.eitem img { width: 17px; height: 17px; border-radius: 4px; object-fit: contain; }
+.eitem.sel { color: var(--accent2); font-weight: 700; }
+html.light .eitem.sel { color: #2e61df; }
+.search button {
+  border: 0; border-radius: 999px; padding: 10px 22px; cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
+  font-size: 14px; font-weight: 700; transition: .18s;
+}
+.search button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+/* 分组 */
+section { margin-top: 30px; }
+.sechead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.sechead h2 { font-size: 15.5px; font-weight: 800; letter-spacing: .4px; }
+.sechead .cnt { font-size: 12px; color: var(--muted); }
+.sechead .actions { margin-left: auto; display: flex; gap: 8px; }
+.minibtn {
+  font-size: 12px; color: var(--muted); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 10px; cursor: pointer; transition: .15s; backdrop-filter: blur(10px);
+}
+.minibtn:hover { color: var(--text); background: var(--card-hover); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+.card {
+  position: relative; display: flex; align-items: center; gap: 12px; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 13px 14px; cursor: pointer; text-decoration: none; color: var(--text);
+  backdrop-filter: blur(16px); transition: transform .16s ease, background .16s ease, box-shadow .16s ease;
+  overflow: hidden;
+}
+.card:hover { transform: translateY(-3px); background: var(--card-hover); box-shadow: var(--shadow); }
+.card img, .card .avatar { width: 40px; height: 40px; border-radius: 11px; object-fit: contain; flex-shrink: 0; background: rgba(255,255,255,.06); padding: 4px; }
+.card .avatar { display: grid; place-items: center; font-weight: 800; font-size: 16px; color: #fff; }
+.card .meta { min-width: 0; }
+.card .nm { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot-state { position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; }
+.dot-state.on { background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,.9); }
+.dot-state.off { background: #6b7280; }
+.card .lock, .card .hidebtn {
+  position: absolute; bottom: 8px; width: 24px; height: 24px; border-radius: 8px;
+  border: 0; background: rgba(127,150,200,.16); color: var(--muted); cursor: pointer; font-size: 11px;
+  display: grid; place-items: center; transition: .15s; opacity: 0;
+}
+.card .lock { right: 8px; }
+.card .hidebtn { right: 36px; }
+.card .hidebtn.solo { right: 8px; }
+.card:hover .lock, .card:hover .hidebtn { opacity: 1; }
+.card .lock:hover, .card .hidebtn:hover { color: #f87171; background: rgba(248,113,113,.16); }
+
+/* 书签行 */
+.chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 9px; }
+.chip {
+  display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 11px;
+  background: var(--card); border: 1px solid var(--line); color: var(--text); font-size: 13px;
+  text-decoration: none; backdrop-filter: blur(12px); transition: .16s; min-width: 0;
+}
+.chip:hover { transform: translateY(-2px); background: var(--card-hover); box-shadow: var(--shadow); }
+.chip img { width: 17px; height: 17px; border-radius: 4px; object-fit: contain; flex-shrink: 0; }
+.chip .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mini-av {
+  width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
+  color: #fff; font-size: 10px; font-weight: 800; display: grid; place-items: center;
+}
+.group-title { font-size: 12.5px; color: var(--muted); margin: 14px 0 8px; font-weight: 700; letter-spacing: .5px; }
+.group-block { margin-bottom: 6px; }
+
+.empty { text-align: center; color: var(--muted); font-size: 13px; padding: 26px 0; }
+
+/* 折叠 */
+.ctitle { cursor: pointer; user-select: none; }
+.chev { display: inline-block; width: 13px; font-size: 11px; color: var(--muted); transition: transform .18s; }
+.collapsed > .ctitle .chev, .collapsed .sechead .chev { transform: rotate(-90deg); }
+.collapsed .cbody { display: none; }
+section.collapsed .sec-body { display: none; }
+
+/* 模态 */
+.modal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(5,8,16,.6); backdrop-filter: blur(6px); }
+.modal.open { display: flex; }
+.dialog {
+  width: min(560px, calc(100vw - 32px)); max-height: 84vh; overflow: auto;
+  background: rgba(20,27,43,.92); border: 1px solid var(--line); border-radius: 18px;
+  padding: 22px; box-shadow: var(--shadow); color: var(--text);
+}
+html.light .dialog { background: rgba(255,255,255,.95); }
+.dialog h3 { font-size: 16px; margin-bottom: 16px; display: flex; align-items: center; }
+.dialog h3 .x { margin-left: auto; cursor: pointer; color: var(--muted); font-size: 20px; line-height: 1; }
+.dialog label { display: block; font-size: 12.5px; color: var(--muted); margin: 12px 0 6px; }
+.dialog input[type=text], .dialog input[type=password], .dialog select {
+  width: 100%; height: 38px; border-radius: 10px; border: 1px solid var(--line);
+  background: rgba(127,150,200,.10); color: var(--text); padding: 0 12px; font-size: 13.5px; outline: none;
+}
+.dialog input:focus { border-color: rgba(79,140,255,.6); }
+.dialog .row { display: flex; gap: 8px; align-items: center; }
+.dialog .row > * { flex: 1; }
+.primary {
+  width: 100%; height: 40px; border: 0; border-radius: 11px; cursor: pointer; margin-top: 16px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-size: 14px; font-weight: 700;
+}
+.danger { background: rgba(220,38,38,.14); color: #f87171; border: 1px solid rgba(248,113,113,.3); }
+.credline { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.credline code {
+  flex: 1; background: rgba(127,150,200,.10); border: 1px solid var(--line); border-radius: 8px;
+  padding: 9px 12px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.copybtn { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 12px; }
+.copybtn:hover { background: var(--card-hover); }
+.wpgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.wpitem { height: 52px; border-radius: 10px; border: 2px solid transparent; cursor: pointer; }
+.wpitem.sel { border-color: var(--accent); }
+.g-aurora { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); }
+.g-sunset { background: linear-gradient(135deg, #355c7d, #6c5b7b, #c06c84); }
+.g-forest { background: linear-gradient(135deg, #134e5e, #71b280); }
+.g-night { background: linear-gradient(135deg, #232526, #414345); }
+.g-violet { background: linear-gradient(135deg, #41295a, #2f0743); }
+.g-ocean { background: linear-gradient(135deg, #2b5876, #4e4376); }
+.bmk-group { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.bmk-link { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+.bmk-link input { height: 32px; font-size: 12.5px; }
+.bmk-link .del { flex: 0 0 30px; height: 32px; border-radius: 8px; }
+.toast {
+  position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(20px);
+  background: rgba(20,27,43,.95); border: 1px solid var(--line); color: var(--text);
+  padding: 10px 20px; border-radius: 12px; font-size: 13px; opacity: 0; pointer-events: none;
+  transition: .25s; z-index: 99; box-shadow: var(--shadow);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+@media (max-width: 640px) {
+  #clock { font-size: 44px; }
+  .grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<div id="wall"></div>
+<div class="wrap">
+  <div class="top">
+    <div class="logo"><span class="dot"></span><span id="appTitle">NASDock</span></div>
+    <div class="spacer"></div>
+    <button class="iconbtn" id="btnRefresh" title="重新扫描">⟳</button>
+    <button class="iconbtn" id="btnBookmarks" title="书签管理">✦</button>
+    <button class="iconbtn" id="btnSettings" title="设置">⚙</button>
+  </div>
+
+  <div class="hero">
+    <div id="clock">--:--</div>
+    <div id="date"></div>
+    <div class="search">
+      <div class="edrop" id="engineDrop"></div>
+      <input id="q" placeholder="搜索或输入网址…" autocomplete="off">
+      <button id="go">搜 索</button>
+    </div>
+  </div>
+
+  <section id="bmkSection" data-key="sec:bmk" class="collapsible">
+    <div class="sechead ctitle"><span class="chev">▾</span><h2>导航</h2><span class="cnt" id="bmkCount"></span>
+      <div class="actions"><button class="minibtn" id="btnBmkManage">管理书签</button></div>
+    </div>
+    <div id="bookmarks" class="sec-body"></div>
+  </section>
+
+  <section id="svcSection" data-key="sec:svc" class="collapsible">
+    <div class="sechead ctitle"><span class="chev">▾</span><h2>容器服务</h2><span class="cnt" id="svcCount"></span></div>
+    <div id="services" class="sec-body"></div>
+  </section>
+</div>
+
+<div class="modal" id="mSettings">
+  <div class="dialog">
+    <h3>设置 <span class="x" data-close>✕</span></h3>
+    <label>壁纸</label>
+    <div class="wpgrid" id="wpGrid">
+      <div class="wpitem g-aurora" data-wp="builtin:aurora"></div>
+      <div class="wpitem g-sunset" data-wp="builtin:sunset"></div>
+      <div class="wpitem g-forest" data-wp="builtin:forest"></div>
+      <div class="wpitem g-night" data-wp="builtin:night"></div>
+      <div class="wpitem g-violet" data-wp="builtin:violet"></div>
+      <div class="wpitem g-ocean" data-wp="builtin:ocean"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="wpUrl" placeholder="或粘贴壁纸图片 URL…" style="min-width:0">
+      <button class="copybtn" id="wpUrlApply" style="flex:0 0 auto">应用</button>
+      <label class="copybtn" style="flex:0 0 auto;display:grid;place-items:center">上传
+        <input type="file" id="wpFile" accept="image/*" style="display:none">
+      </label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="copybtn" id="wpBing" style="flex:1">必应每日</button>
+      <button class="copybtn" id="wpPicsum" style="flex:1">随机美图</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="whQuery" placeholder="Wallhaven 关键词（风景/anime/星空…）" style="min-width:0">
+      <button class="copybtn" id="wpWh" style="flex:0 0 auto">壁纸库换一张</button>
+    </div>
+    <label>主题</label>
+    <select id="setTheme"><option value="dark">深色</option><option value="light">浅色</option></select>
+    <label>默认搜索引擎</label>
+    <div id="setEnginePick"></div>
+    <label>主页标题</label>
+    <input type="text" id="setTitle" placeholder="NASDock">
+    <label>已隐藏的容器（点恢复重新显示）</label>
+    <div id="hiddenList" style="max-height:120px;overflow:auto"></div>
+    <label>访问令牌（用于其他设备登录，妥善保管）</label>
+    <div class="credline"><code id="tokenShow">···</code><button class="copybtn" id="tokenCopy">复制</button></div>
+    <button class="primary" id="saveSettings">保存设置</button>
+  </div>
+</div>
+
+<div class="modal" id="mEdit">
+  <div class="dialog">
+    <h3>编辑服务 <span class="x" data-close>✕</span></h3>
+    <label>图标（自动获取会从该站点抓取 Logo，上传支持 png/jpg/webp）</label>
+    <div class="row" style="align-items:center">
+      <img id="edIcon" width="38" height="38" style="border-radius:10px;background:rgba(255,255,255,.06);object-fit:contain;flex:0 0 38px">
+      <button class="copybtn" id="edIconAuto" style="flex:0 0 auto">自动获取</button>
+      <label class="copybtn" style="flex:0 0 auto;display:grid;place-items:center">上传图标
+        <input type="file" id="edIconFile" accept="image/*" style="display:none">
+      </label>
+    </div>
+    <label>显示名称</label>
+    <input type="text" id="edName">
+    <label>访问地址（留空=自动使用第一个端口）</label>
+    <input type="text" id="edUrl" placeholder="http://…">
+    <label>分组</label>
+    <select id="edCat">
+      <option value="">自动</option><option value="media">影音</option><option value="download">下载</option>
+      <option value="network">网络</option><option value="database">数据库</option><option value="tools">工具</option>
+      <option value="apps">应用</option>
+    </select>
+    <label>账号（手动补充，自动扫描的账号密码也在其中）</label>
+    <input type="text" id="edUser">
+    <label>密码 / 令牌</label>
+    <input type="text" id="edPass">
+    <div class="row" style="margin-top:14px">
+      <button class="copybtn" id="edHide">从主页隐藏</button>
+      <button class="copybtn" id="edReset">恢复默认</button>
+    </div>
+    <button class="primary" id="edSave">保存</button>
+  </div>
+</div>
+
+<div class="modal" id="mCred">
+  <div class="dialog">
+    <h3>访问凭据 <span class="x" data-close>✕</span></h3>
+    <div id="credBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="mBmk">
+  <div class="dialog">
+    <h3>书签管理 <span class="x" data-close>✕</span></h3>
+    <div style="border:1px dashed var(--line); border-radius:12px; padding:12px; margin-bottom:12px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">
+        导入浏览器收藏夹：在浏览器书签管理器（Ctrl+Shift+O）→ 导出书签，得到 HTML 文件后上传
+      </div>
+      <div class="row">
+        <label class="copybtn" style="flex:0 0 auto;display:grid;place-items:center">选择书签 HTML
+          <input type="file" id="bmkImportFile" accept=".html,.htm" style="display:none">
+        </label>
+        <span id="bmkImportHint" style="font-size:12px;color:var(--muted)">支持拖拽文件到本弹窗</span>
+      </div>
+      <div id="bmkFolders" style="max-height:180px;overflow:auto;margin-top:8px"></div>
+    </div>
+    <div id="bmkEditor"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="copybtn" id="bmkAddGroup">＋ 添加分组</button>
+    </div>
+    <button class="primary" id="bmkSave">保存书签</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 基础 ================= */
+const $ = (id) => document.getElementById(id);
+const CAT_NAMES = { media: '影音', download: '下载', network: '网络', database: '数据库', tools: '工具', apps: '应用' };
+let DATA = null;
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 1800);
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ================= 时钟 ================= */
+function tick() {
+  const n = new Date();
+  $('clock').textContent = n.toTimeString().slice(0, 5);
+  const wd = '日一二三四五六'[n.getDay()];
+  const h = n.getHours();
+  const greet = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+  $('date').textContent = `${greet} · ${n.getMonth() + 1} 月 ${n.getDate()} 日 星期${wd}`;
+}
+setInterval(tick, 1000); tick();
+
+/* ================= 搜索 ================= */
+const ENGINES = {
+  baidu:  { name: '百度',       url: 'https://www.baidu.com/s?wd=',        icon: 'baidu' },
+  google: { name: 'Google',     url: 'https://www.google.com/search?q=',   icon: 'google' },
+  bing:   { name: '必应',       url: 'https://www.bing.com/search?q=',     icon: 'bing' },
+  duck:   { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=',         icon: 'duckduckgo' },
+};
+const ICON_BASE = 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/';
+let currentEngine = 'baidu';
+
+function buildEnginePicker(container, current, onPick) {
+  container.innerHTML = `
+    <button type="button" class="ebtn"><img src="${ICON_BASE}${ENGINES[current].icon}.png"
+      onerror="this.style.visibility='hidden'"><span>${esc(ENGINES[current].name)}</span><span class="car">▾</span></button>
+    <div class="emenu">${Object.entries(ENGINES).map(([k, v]) => `
+      <button type="button" class="eitem${k === current ? ' sel' : ''}" data-eng="${k}">
+        <img src="${ICON_BASE}${v.icon}.png" onerror="this.style.visibility='hidden'"><span>${esc(v.name)}</span>
+      </button>`).join('')}
+    </div>`;
+  const btn = container.querySelector('.ebtn');
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.edrop.open').forEach(d => { if (d !== container) d.classList.remove('open'); });
+    container.classList.toggle('open');
+  });
+  container.querySelectorAll('.eitem').forEach(item => item.addEventListener('click', (e) => {
+    e.stopPropagation();
+    container.classList.remove('open');
+    onPick(item.dataset.eng);
+  }));
+}
+document.addEventListener('click', () => document.querySelectorAll('.edrop.open').forEach(d => d.classList.remove('open')));
+
+function doSearch() {
+  const q = $('q').value.trim();
+  if (!q) return;
+  if (/^https?:\/\//.test(q)) return window.open(q, '_blank');
+  window.open(ENGINES[currentEngine].url + encodeURIComponent(q), '_blank');
+}
+$('go').addEventListener('click', doSearch);
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+function setEngine(key, persist) {
+  currentEngine = key;
+  buildEnginePicker($('engineDrop'), key, (k) => setEngine(k, true));
+  if (persist) {
+    api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: key }) });
+    toast('默认搜索引擎已设为 ' + ENGINES[key].name);
+  }
+}
+
+/* ================= 壁纸 ================= */
+const BUILTIN_GRADS = { aurora: 'g-aurora', sunset: 'g-sunset', forest: 'g-forest', night: 'g-night', violet: 'g-violet', ocean: 'g-ocean' };
+function applyWallpaper(wp) {
+  const el = $('wall');
+  el.style.backgroundImage = '';
+  el.className = '';
+  if (!wp) { el.style.background = 'linear-gradient(135deg,#0f2027,#203a43,#2c5364)'; return; }
+  if (wp.type === 'builtin') {
+    el.style.background = '';
+    el.classList.add(BUILTIN_GRADS[wp.value] || 'g-aurora');
+  } else if (wp.type === 'url') {
+    el.style.backgroundImage = `url("${wp.value}")`;
+  } else if (wp.type === 'upload' || wp.type === 'bing' || wp.type === 'local') {
+    el.style.backgroundImage = `url("/api/wallpaper/${wp.value}?t=${Date.now()}")`;
+  }
+}
+async function fetchWallpaper(payload, btn, loadingText) {
+  const old = btn.textContent; btn.disabled = true; btn.textContent = loadingText;
+  try {
+    const r = await api('/api/wallpaper/fetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (r.ok) { saveWallpaper(r.wallpaper); }
+    else toast(r.error || '获取失败');
+  } catch (e) { toast('获取失败：' + e); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+$('wpPicsum').addEventListener('click', (e) => fetchWallpaper({ source: 'picsum' }, e.target, '下载中…'));
+$('wpWh').addEventListener('click', (e) => fetchWallpaper({ source: 'wallhaven', q: $('whQuery').value.trim() || 'landscape' }, e.target, '下载中…'));
+$('wpUrlApply').addEventListener('click', () => {
+  const u = $('wpUrl').value.trim(); if (!u) return;
+  saveWallpaper({ type: 'url', value: u });
+});
+$('wpBing').addEventListener('click', async () => {
+  const r = await api('/api/bing');
+  if (r.ok) saveWallpaper({ type: 'bing', value: 'bing.' + (r.url.split('.').pop().split('?')[0] || 'jpg') });
+  else toast('必应壁纸获取失败');
+});
+function markSelected(wp) {
+  document.querySelectorAll('.wpitem').forEach(el => el.classList.remove('sel'));
+  if (wp && wp.type === 'builtin') document.querySelector(`[data-wp="builtin:${wp.value}"]`)?.classList.add('sel');
+}
+document.querySelectorAll('.wpitem').forEach(el => el.addEventListener('click', () => {
+  saveWallpaper({ type: 'builtin', value: el.dataset.wp.split(':')[1] });
+}));
+async function saveWallpaper(wp) {
+  await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallpaper: wp }) });
+  applyWallpaper(wp); markSelected(wp); toast('壁纸已更新');
+}
+$('wpFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  const r = await api('/api/wallpaper', { method: 'POST', body: fd });
+  if (r.ok) saveWallpaper({ type: 'upload', value: r.file });
+});
+
+/* ================= 折叠 ================= */
+function getCollapsedKeys() {
+  try { return JSON.parse(localStorage.getItem('nasdock_collapsed') || '[]'); } catch (e) { return []; }
+}
+function setCollapsedKey(key, collapsed) {
+  let keys = getCollapsedKeys();
+  if (collapsed && !keys.includes(key)) keys.push(key);
+  if (!collapsed) keys = keys.filter(k => k !== key);
+  try { localStorage.setItem('nasdock_collapsed', JSON.stringify(keys)); } catch (e) {}
+}
+function applyCollapse(root = document) {
+  root.querySelectorAll('[data-key]').forEach(el => {
+    el.classList.toggle('collapsed', getCollapsedKeys().includes(el.dataset.key));
+  });
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('button, a, input, select, .credline, .card, .chip')) return;
+  const title = e.target.closest('.ctitle');
+  if (!title) return;
+  const host = title.closest('[data-key]');
+  if (!host) return;
+  const now = !host.classList.contains('collapsed');
+  host.classList.toggle('collapsed', now);
+  setCollapsedKey(host.dataset.key, now);
+});
+
+/* ================= 服务渲染 ================= */
+function iconHtml(s) {
+  if (s.icon_override) {
+    return `<img src="/api/icon/${encodeURIComponent(s.name)}?v=${s.icon_ts || 0}" loading="lazy"
+      onerror="this.outerHTML='<span class=avatar style=background:#475569>N</span>'">`;
+  }
+  const slug = s.icon || s.image_slug;
+  const base = 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons';
+  const color = `hsl(${[...slug].reduce((a, c) => a + c.charCodeAt(0), 0) % 360},55%,45%)`;
+  const letter = esc((s.display_name || s.name)[0] || '?').toUpperCase();
+  return `<img src="${base}/png/${slug}.png" loading="lazy" data-svg="${base}/svg/${slug}.svg"
+    data-color="${color}" data-letter="${letter}" onerror="ndIconFail(this)">`;
+}
+function ndIconFail(el) {
+  if (!el.dataset.tried) { el.dataset.tried = '1'; el.src = el.dataset.svg; return; }
+  el.outerHTML = `<span class="avatar" style="background:${el.dataset.color}">${el.dataset.letter}</span>`;
+}
+function ndChipIconFail(el) {
+  if (!el.dataset.tried && el.dataset.fav) { el.dataset.tried = '1'; el.src = el.dataset.fav; return; }
+  el.outerHTML = `<span class="mini-av" style="background:${el.dataset.color}">${el.dataset.letter || '•'}</span>`;
+}
+function serviceUrl(s) {
+  if (s.url_override) return s.url_override;
+  if (!s.ports || !s.ports.length) return null;
+  return `http://${location.hostname}:${s.ports[0]}`;
+}
+function renderServices() {
+  const box = $('services');
+  const list = DATA.services || [];
+  $('svcCount').textContent = `${list.filter(s => s.state === 'running').length} 运行中 / ${list.length} 个`;
+  if (!list.length) { box.innerHTML = '<div class="empty">未扫描到容器（检查 docker.sock 挂载）</div>'; return; }
+  const groups = {};
+  list.forEach(s => { const c = s.category || 'apps'; (groups[c] = groups[c] || []).push(s); });
+  let html = '';
+  for (const cat of Object.keys(groups).sort((a, b) => (CAT_NAMES[a] || a).localeCompare(CAT_NAMES[b], 'zh'))) {
+    html += `<div class="collapsible" data-key="cat:${esc(cat)}">
+      <div class="group-title ctitle"><span class="chev">▾</span>${esc(CAT_NAMES[cat] || cat)} · ${groups[cat].length}</div>
+      <div class="cbody"><div class="grid">`;
+    for (const s of groups[cat]) {
+      const url = serviceUrl(s);
+      const nm = s.display_name || s.name;
+      const sub = url ? url.replace(/^https?:\/\//, '') : (s.image || '');
+      const hasCred = (s.credentials && (s.credentials.username || s.credentials.password || (s.credentials.extras || []).length));
+      const lock = hasCred ? `<button class="lock" data-lock="${esc(s.name)}" title="查看凭据">🔒</button>` : '';
+      const hide = `<button class="hidebtn${hasCred ? '' : ' solo'}" data-hide="${esc(s.name)}" title="从主页移除">✕</button>`;
+      html += url
+        ? `<a class="card" href="${esc(url)}" target="_blank" rel="noopener">${iconHtml(s)}
+           <div class="meta"><div class="nm">${esc(nm)}</div><div class="sub">${esc(sub)}</div></div>
+           <span class="dot-state ${s.state === 'running' ? 'on' : 'off'}"></span>${lock}${hide}</a>`
+        : `<div class="card" style="cursor:default">${iconHtml(s)}
+           <div class="meta"><div class="nm">${esc(nm)}</div><div class="sub">${esc(s.image || '')}</div></div>
+           <span class="dot-state ${s.state === 'running' ? 'on' : 'off'}"></span>${lock}${hide}</div>`;
+    }
+    html += '</div></div></div>';
+  }
+  box.innerHTML = html;
+  applyCollapse(box);
+}
+$('services').addEventListener('click', async (e) => {
+  const hide = e.target.closest('[data-hide]');
+  if (hide) {
+    e.preventDefault(); e.stopPropagation();
+    const name = hide.dataset.hide;
+    hide.disabled = true;
+    await api('/api/overrides/' + encodeURIComponent(name), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hide: true }) });
+    await loadData();
+    toast(`已移除「${name}」，设置里可恢复`);
+    return;
+  }
+  const lock = e.target.closest('[data-lock]');
+  if (lock) { e.preventDefault(); e.stopPropagation(); showCred(lock.dataset.lock); }
+});
+
+/* ================= 凭据 ================= */
+function showCred(name) {
+  const s = (DATA.services || []).find(x => x.name === name);
+  if (!s) return;
+  const c = s.credentials || {};
+  const rows = [];
+  if (c.username) rows.push(['账号', c.username]);
+  if (c.password) rows.push(['密码 / 令牌', c.password]);
+  (c.extras || []).forEach(x => rows.push([x.key, x.value]));
+  $('credBody').innerHTML = rows.length
+    ? rows.map(([k, v]) => `<div class="credline"><span style="width:92px;font-size:12px;color:var(--muted)">${esc(k)}</span><code>${esc(v)}</code><button class="copybtn" data-copy="${esc(v)}">复制</button></div>`).join('')
+      + '<div style="font-size:11.5px;color:var(--muted);margin-top:8px">凭据来自容器环境变量或手动补充，仅保存在 NAS 本机</div>'
+    : '<div class="empty">该服务没有发现凭据，可在「编辑」里手动补充</div>';
+  openModal('mCred');
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-copy]');
+  if (b) { await navigator.clipboard.writeText(b.dataset.copy); toast('已复制'); }
+});
+
+/* ================= 书签 ================= */
+function renderBookmarks() {
+  const box = $('bookmarks');
+  const groups = DATA.bookmarks || [];
+  $('bmkCount').textContent = groups.reduce((a, g) => a + (g.links || []).length, 0) + ' 个链接';
+  if (!groups.length) { box.innerHTML = '<div class="empty">还没有书签，点右上「管理书签」添加自定义导航</div>'; return; }
+  box.innerHTML = groups.map(g => `
+    <div class="group-block collapsible" data-key="bmk:${esc(g.name)}">
+      <div class="group-title ctitle"><span class="chev">▾</span>${esc(g.name)} · ${(g.links || []).length}</div>
+      <div class="cbody"><div class="chips">
+        ${(g.links || []).map(l => {
+          let host = '', origin = ''; try { const u = new URL(l.url); host = u.hostname; origin = u.origin; } catch (err) {}
+          const isData = l.icon && l.icon.startsWith('data:');
+          const slug = (l.icon && !isData) ? l.icon : (host.replace(/^www\./, '').split('.').slice(0, -1).join('-') || host);
+          const letter = esc((l.name || '?')[0].toUpperCase());
+          const color = `hsl(${[...slug].reduce((a, c) => a + c.charCodeAt(0), 0) % 360},55%,42%)`;
+          return `<a class="chip" href="${esc(l.url)}" target="_blank" rel="noopener">
+            <img src="${isData ? esc(l.icon) : 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/' + esc(slug) + '.png'}"
+              data-fav="${esc(origin)}/favicon.ico" data-letter="${letter}" data-color="${color}"
+              onerror="ndChipIconFail(this)"><span class="nm">${esc(l.name)}</span></a>`;
+        }).join('')}
+      </div></div>
+    </div>`).join('');
+  applyCollapse(box);
+}
+
+/* 书签编辑器 */
+let bmkDraft = [];
+$('btnBmkManage').addEventListener('click', () => { bmkDraft = JSON.parse(JSON.stringify(DATA.bookmarks || [])); $('bmkFolders').innerHTML = ''; $('bmkImportHint').textContent = '支持拖拽文件到本弹窗'; renderBmkEditor(); openModal('mBmk'); });
+
+/* 浏览器书签导入 */
+let parsedFolders = [];
+async function importBmkFile(file) {
+  if (!file) return;
+  $('bmkImportHint').textContent = '解析中…';
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch('/api/bookmarks/parse', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!d.ok) { $('bmkImportHint').textContent = d.error || '解析失败'; return; }
+    parsedFolders = d.folders;
+    $('bmkImportHint').textContent = `共解析出 ${d.folders.length} 个文件夹，点击「导入」`;
+    renderParsedFolders();
+  } catch (err) {
+    $('bmkImportHint').textContent = '上传失败：' + err;
+  }
+}
+function renderParsedFolders() {
+  $('bmkFolders').innerHTML = parsedFolders.map((f, i) => `
+    <div class="credline">
+      <span style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.path)}">${esc(f.leaf)} <span style="color:var(--muted)">· ${f.count} 个链接 · ${esc(f.path)}</span></span>
+      <button class="copybtn" data-imp="${i}">导入</button>
+    </div>`).join('');
+}
+$('bmkFolders').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-imp]');
+  if (!b) return;
+  const f = parsedFolders[+b.dataset.imp];
+  if (!f) return;
+  b.disabled = true; b.textContent = '导入中…';
+  const r = await api('/api/bookmarks/import', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_name: f.leaf, links: f.links }) });
+  if (r.ok) {
+    b.textContent = `✓ 已${r.mode === 'merged' ? '合并' : '创建'}(+${r.added})`;
+    await loadData(); toast(`已导入「${f.leaf}」${r.added} 个链接`);
+  } else { b.textContent = '失败'; toast(r.error || '导入失败'); }
+});
+$('bmkImportFile').addEventListener('change', (e) => importBmkFile(e.target.files[0]));
+const bmkDialog = document.querySelector('#mBmk .dialog');
+bmkDialog.addEventListener('dragover', (e) => { e.preventDefault(); bmkDialog.style.borderColor = 'rgba(79,140,255,.6)'; });
+bmkDialog.addEventListener('dragleave', () => { bmkDialog.style.borderColor = ''; });
+bmkDialog.addEventListener('drop', (e) => {
+  e.preventDefault(); bmkDialog.style.borderColor = '';
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && /\.html?$/i.test(f.name)) importBmkFile(f);
+});
+function renderBmkEditor() {
+  $('bmkEditor').innerHTML = bmkDraft.map((g, gi) => `
+    <div class="bmk-group">
+      <div class="row">
+        <input type="text" value="${esc(g.name)}" data-gname="${gi}" placeholder="分组名">
+        <button class="copybtn del" data-gdel="${gi}" style="flex:0 0 auto">删除组</button>
+      </div>
+      ${(g.links || []).map((l, li) => `
+        <div class="bmk-link">
+          <input type="text" value="${esc(l.name)}" data-lname="${gi}.${li}" placeholder="名称" style="flex:0 0 130px">
+          <input type="text" value="${esc(l.url)}" data-lurl="${gi}.${li}" placeholder="https://…">
+          <button class="copybtn del" data-bfind="${gi}.${li}" title="自动获取图标">🖼</button>
+          <button class="copybtn del" data-ldel="${gi}.${li}" style="flex:0 0 30px">✕</button>
+        </div>`).join('')}
+      <button class="copybtn" data-ladd="${gi}" style="margin-top:8px">＋ 添加链接</button>
+    </div>`).join('') || '<div class="empty">还没有分组</div>';
+}
+$('bmkEditor').addEventListener('click', async (e) => {
+  const t = e.target;
+  if (t.dataset.gadd !== undefined) return;
+  if (t.dataset.gdel !== undefined) { bmkDraft.splice(+t.dataset.gdel, 1); renderBmkEditor(); }
+  else if (t.dataset.ldel !== undefined) { const [gi, li] = t.dataset.ldel.split('.').map(Number); bmkDraft[gi].links.splice(li, 1); renderBmkEditor(); }
+  else if (t.dataset.ladd !== undefined) { bmkDraft[+t.dataset.ladd].links.push({ name: '', url: '' }); renderBmkEditor(); }
+  else if (t.dataset.bfind !== undefined) {
+    const [gi, li] = t.dataset.bfind.split('.').map(Number);
+    const link = bmkDraft[gi].links[li];
+    if (!link || !link.url) return toast('先填好链接再获取图标');
+    t.textContent = '…';
+    const r = await api('/api/icon/find', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: link.url }) });
+    if (r.ok) { link.icon = r.data; t.textContent = '✓'; toast('图标已获取（来源：' + (r.source || '') + '），保存书签后生效'); }
+    else { t.textContent = '🖼'; toast(r.error || '未找到图标'); }
+  }
+});
+$('bmkAddGroup').addEventListener('click', () => { bmkDraft.push({ name: '新分组', links: [] }); renderBmkEditor(); });
+$('bmkEditor').addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.dataset.gname !== undefined) bmkDraft[+t.dataset.gname].name = t.value;
+  else if (t.dataset.lname !== undefined) { const [g, l] = t.dataset.lname.split('.').map(Number); bmkDraft[g].links[l].name = t.value; }
+  else if (t.dataset.lurl !== undefined) { const [g, l] = t.dataset.lurl.split('.').map(Number); bmkDraft[g].links[l].url = t.value; }
+});
+$('bmkSave').addEventListener('click', async () => {
+  const r = await api('/api/bookmarks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bmkDraft) });
+  if (r.ok) { closeModal('mBmk'); await loadData(); toast('书签已保存'); }
+});
+
+/* ================= 服务编辑 ================= */
+let editTarget = null;
+$('services').addEventListener('contextmenu', (e) => {
+  const card = e.target.closest('.card');
+  if (!card) return;
+  e.preventDefault();
+  const a = card.getAttribute('href');
+  const name = card.querySelector('[data-lock]')?.dataset.lock;
+  // 通过顺序定位：直接用 href/或名称匹配
+  let svc;
+  if (name) svc = DATA.services.find(s => s.name === name);
+  if (!svc && a) svc = DATA.services.find(s => serviceUrl(s) === a);
+  if (!svc) {
+    // 兜底：鼠标悬停卡片索引
+    const cards = [...document.querySelectorAll('#services .card')];
+    svc = DATA.services[cards.indexOf(card)];
+  }
+  if (svc) openEdit(svc);
+});
+function openEdit(svc) {
+  editTarget = svc.name;
+  $('edIcon').src = svc.icon_override
+    ? '/api/icon/' + encodeURIComponent(svc.name) + '?v=' + (svc.icon_ts || 0)
+    : 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/' + (svc.icon || svc.image_slug || 'none') + '.png';
+  $('edName').value = svc.display_name || '';
+  $('edUrl').value = svc.url_override || '';
+  $('edCat').value = svc.has_override && svc.category ? svc.category : '';
+  $('edUser').value = (svc.credentials && svc.credentials.username) || '';
+  $('edPass').value = (svc.credentials && svc.credentials.password) || '';
+  openModal('mEdit');
+}
+$('edSave').addEventListener('click', async () => {
+  if (!editTarget) return;
+  const payload = {
+    display_name: $('edName').value.trim(),
+    url_override: $('edUrl').value.trim(),
+    category: $('edCat').value,
+    credentials: { username: $('edUser').value.trim(), password: $('edPass').value.trim() },
+  };
+  try {
+    const r = await api('/api/overrides/' + encodeURIComponent(editTarget), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!r || !r.ok) { toast(r && r.error ? r.error : '保存失败'); return; }
+    closeModal('mEdit'); await loadData(); toast('已保存');
+  } catch (err) { toast('保存失败：' + err); }
+});
+$('edIconAuto').addEventListener('click', async () => {
+  if (!editTarget) return;
+  const s = DATA.services.find(x => x.name === editTarget);
+  const url = serviceUrl(s) || (s && s.url_override) || '';
+  if (!url) return toast('该服务没有可用地址，无法自动获取');
+  const btn = $('edIconAuto'); btn.disabled = true; btn.textContent = '获取中…';
+  const r = await api('/api/icon/find', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: editTarget, url }) });
+  btn.disabled = false; btn.textContent = '自动获取';
+  if (r.ok) { $('edIcon').src = r.url + '&t=' + Date.now(); toast('图标已更新（来源：' + (r.source || '') + '）'); await loadData(); }
+  else toast(r.error || '未能找到该站点的图标');
+});
+$('edIconFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f || !editTarget) return;
+  const fd = new FormData(); fd.append('key', editTarget); fd.append('file', f);
+  const r = await api('/api/icon/upload', { method: 'POST', body: fd });
+  if (r.ok) { $('edIcon').src = r.url + '&t=' + Date.now(); toast('图标已上传'); await loadData(); }
+  else toast(r.error || '上传失败');
+  e.target.value = '';
+});
+$('edHide').addEventListener('click', async () => {
+  if (!editTarget) return;
+  await api('/api/overrides/' + encodeURIComponent(editTarget), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hide: true }) });
+  closeModal('mEdit'); await loadData(); toast('已隐藏');
+});
+$('edReset').addEventListener('click', async () => {
+  if (!editTarget) return;
+  await api('/api/overrides/' + encodeURIComponent(editTarget), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ display_name: '', url_override: '', category: '', credentials: {}, hide: false, icon_uploaded: false }) });
+  closeModal('mEdit'); await loadData(); toast('已恢复默认');
+});
+
+/* ================= 设置 ================= */
+$('btnSettings').addEventListener('click', () => {
+  const s = DATA.settings || {};
+  $('setTheme').value = s.theme || 'dark';
+  buildEnginePicker($('setEnginePick'), s.engine || 'baidu', () => {});
+  $('setTitle').value = s.title || 'NASDock';
+  markSelected(s.wallpaper);
+  const hl = $('hiddenList');
+  const hidden = DATA.hidden || [];
+  hl.innerHTML = hidden.length
+    ? hidden.map(h => `<div class="credline"><span style="flex:1;font-size:12.5px">${esc(h.name)} <span style="color:var(--muted)">· ${esc(h.image)}</span></span><button class="copybtn" data-restore="${esc(h.name)}">恢复</button></div>`).join('')
+    : '<div style="font-size:12px;color:var(--muted)">没有隐藏的容器</div>';
+  $('tokenShow').textContent = ndGetToken() ? ndGetToken().slice(0, 6) + '••••••' : '（未设置）';
+  openModal('mSettings');
+});
+$('hiddenList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-restore]');
+  if (!b) return;
+  b.disabled = true; b.textContent = '恢复中';
+  await api('/api/overrides/' + encodeURIComponent(b.dataset.restore), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hide: false }) });
+  await loadData();
+  toast('已恢复 ' + b.dataset.restore);
+  const hidden = DATA.hidden || [];
+  $('hiddenList').innerHTML = hidden.length
+    ? hidden.map(h => `<div class="credline"><span style="flex:1;font-size:12.5px">${esc(h.name)}</span><button class="copybtn" data-restore="${esc(h.name)}">恢复</button></div>`).join('')
+    : '<div style="font-size:12px;color:var(--muted)">没有隐藏的容器</div>';
+});
+$('tokenCopy').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(ndGetToken() || ''); toast('令牌已复制');
+});
+$('saveSettings').addEventListener('click', async () => {
+  const engBtn = document.querySelector('#setEnginePick .eitem.sel');
+  const engKey = engBtn ? engBtn.dataset.eng : (DATA.settings.engine || 'baidu');
+  const payload = { theme: $('setTheme').value, engine: engKey, title: $('setTitle').value.trim() || 'NASDock' };
+  const r = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  if (r.ok) { closeModal('mSettings'); await loadData(); toast('设置已保存'); }
+});
+$('setTheme').addEventListener('change', () => {
+  document.documentElement.classList.toggle('light', $('setTheme').value === 'light');
+});
+$('btnRefresh').addEventListener('click', async () => { await loadData(); toast('已重新扫描'); });
+
+/* ================= 模态通用 ================= */
+function openModal(id) { $(id).classList.add('open'); }
+function closeModal(id) { $(id).classList.remove('open'); }
+document.querySelectorAll('.modal').forEach(m => {
+  m.addEventListener('click', (e) => { if (e.target === m || e.target.dataset.close !== undefined) m.classList.remove('open'); });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal.open').forEach(m => m.classList.remove('open'));
+  if (e.key === '/' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); $('q').focus(); }
+});
+
+/* ================= 加载 ================= */
+async function loadData() {
+  DATA = await api('/api/data');
+  if (!DATA || DATA.ok === false) { toast('加载失败'); return; }
+  const s = DATA.settings || {};
+  document.documentElement.classList.toggle('light', s.theme === 'light');
+  $('appTitle').textContent = s.title || 'NASDock';
+  document.title = s.title || 'NASDock';
+  setEngine(s.engine || 'baidu', false);
+  applyWallpaper(s.wallpaper);
+  markSelected(s.wallpaper);
+  renderServices();
+  renderBookmarks();
+  applyCollapse(document);
+  try { $('q').focus(); } catch (e) {}
+}
+loadData();
+</script>
+</body>
+</html>
