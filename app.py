@@ -262,6 +262,12 @@ def api_data():
                    for s in services if s["name"] in hidden]
     services = [s for s in services if s["name"] not in hidden]
     services.sort(key=lambda s: (s["state"] != "running", s["category"], s["name"]))
+    # 未命中本地缓存的图标入队，由后台线程抓取
+    try:
+        for s in services:
+            enqueue_icon((s.get("icon") or s.get("image_slug") or ""))
+    except Exception:
+        pass
     bookmarks = _read_json(BOOKMARKS_FILE, [])
     settings = {**DEFAULT_SETTINGS, **_read_json(SETTINGS_FILE, {})}
     # 一次性清洗历史书签名称（浏览器导出的网页标题很脏）
@@ -654,6 +660,102 @@ def api_icon_find():
         return jsonify({"ok": True, "url": f"/api/icon/{key}?v={int(time.time())}", "source": source})
     b64 = base64.b64encode(content).decode()
     return jsonify({"ok": True, "data": f"data:image/png;base64,{b64}", "source": source})
+
+
+# ---------------------------------------------------------------- 外部图标本地缓存
+
+ICONCACHE_DIR = CONFIG_DIR / "iconcache"
+ICONCACHE_DIR.mkdir(parents=True, exist_ok=True)
+_icon_negative = {}          # slug -> 失败时间戳（TTL 内不重试）
+_icon_lock = threading.Lock()
+_ICON_RETRY_AFTER = 600      # 抓取失败 10 分钟内不重试（避免拖慢与限流）
+_icon_warm_queue = set()     # 待后台抓取的 slug
+_icon_wake = threading.Event()
+
+
+def _icon_cached(slug):
+    for suffix, min_size in ((".png", 120), (".svg", 120)):
+        p = ICONCACHE_DIR / f"{slug}{suffix}"
+        if p.exists() and p.stat().st_size > min_size:
+            return True
+    return False
+
+
+def _icon_valid_slug(slug):
+    return bool(re.match(r"^[a-z0-9][a-z0-9\-_.]{0,60}$", slug))
+
+
+def enqueue_icon(slug):
+    """图标未命中时入队，由后台线程抓取——请求路径永远不等待网络"""
+    slug = (slug or "").strip().lower()
+    if not _icon_valid_slug(slug) or _icon_cached(slug):
+        return
+    if time.time() - _icon_negative.get(slug, 0) < _ICON_RETRY_AFTER:
+        return
+    with _icon_lock:
+        if slug not in _icon_warm_queue:
+            _icon_warm_queue.add(slug)
+            _icon_wake.set()
+
+
+def _fetch_icon(slug):
+    import httpx
+    proxies = None
+    if os.getenv("HTTP_PROXY"):
+        proxies = {"http://": os.getenv("HTTP_PROXY"), "https://": os.getenv("HTTP_PROXY")}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    base = "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons"
+    with httpx.Client(timeout=12, headers=headers, proxy=proxies, follow_redirects=True) as client:
+        for suffix, min_size in ((".png", 120), (".svg", 200)):
+            try:
+                r = client.get(f"{base}/{suffix.strip('.')}/{slug}{suffix}")
+                if r.status_code == 200 and len(r.content) > min_size:
+                    (ICONCACHE_DIR / f"{slug}{suffix}").write_bytes(r.content)
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def _icon_worker():
+    while True:
+        _icon_wake.wait()
+        _t = time.time()
+        with _icon_lock:
+            batch = [s for s in _icon_warm_queue if _icon_cached(s) is False]
+            _icon_warm_queue.clear()
+        for slug in batch:
+            try:
+                if _icon_cached(slug):
+                    continue
+                if not _fetch_icon(slug):
+                    _icon_negative[slug] = time.time()
+            except Exception:
+                _icon_negative[slug] = time.time()
+            _t = time.time()
+            while time.time() - _t < 0.5:  # 抓取间隔，防限流
+                _t = _t
+                time.sleep(0.5)
+                break
+
+
+threading.Thread(target=_icon_worker, daemon=True).start()
+
+
+@app.get("/api/icache/<slug>")
+def api_icache(slug):
+    slug = slug.strip().lower()
+    slug = re.sub(r"\.(png|svg)$", "", slug)  # 剥掉前端附加的扩展名
+    if not _icon_valid_slug(slug):
+        return jsonify({"ok": False}), 404
+    for suffix, mime in ((".png", "image/png"), (".svg", "image/svg+xml")):
+        p = ICONCACHE_DIR / f"{slug}{suffix}"
+        if p.exists() and p.stat().st_size > 0:
+            resp = send_file(p, mimetype=mime, conditional=True)
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return resp
+    enqueue_icon(slug)  # 未命中：立即 404 让前端兜底，后台补缓存
+    return jsonify({"ok": False}), 404
 
 
 @app.post("/api/bookmarks/parse")

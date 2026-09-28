@@ -432,7 +432,7 @@ const ENGINES = {
   bing:   { name: '必应',       url: 'https://www.bing.com/search?q=',     icon: 'bing' },
   duck:   { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=',         icon: 'duckduckgo' },
 };
-const ICON_BASE = 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/';
+const ICON_BASE = '/api/icache/';
 let currentEngine = 'baidu';
 
 function buildEnginePicker(container, current, onPick) {
@@ -562,10 +562,10 @@ function iconHtml(s) {
       onerror="this.outerHTML='<span class=avatar style=background:#475569>N</span>'">`;
   }
   const slug = s.icon || s.image_slug;
-  const base = 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons';
+  const base = '/api/icache';
   const color = `hsl(${[...slug].reduce((a, c) => a + c.charCodeAt(0), 0) % 360},55%,45%)`;
   const letter = esc((s.display_name || s.name)[0] || '?').toUpperCase();
-  return `<img src="${base}/png/${slug}.png" loading="lazy" data-svg="${base}/svg/${slug}.svg"
+  return `<img src="${base}/png/${slug}.png" loading="lazy" data-svg="${base}/${slug}.svg"
     data-color="${color}" data-letter="${letter}" onerror="ndIconFail(this)">`;
 }
 function ndIconFail(el) {
@@ -665,7 +665,7 @@ function renderBookmarks() {
           const letter = esc((l.name || '?')[0].toUpperCase());
           const color = `hsl(${[...slug].reduce((a, c) => a + c.charCodeAt(0), 0) % 360},55%,42%)`;
           return `<a class="chip" href="${esc(l.url)}" target="_blank" rel="noopener">
-            <img src="${isData ? esc(l.icon) : 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/' + esc(slug) + '.png'}"
+            <img src="${isData ? esc(l.icon) : '/api/icache/' + esc(slug) + '.png'}"
               data-fav="${esc(origin)}/favicon.ico" data-letter="${letter}" data-color="${color}"
               onerror="ndChipIconFail(this)"><span class="nm">${esc(l.name)}</span></a>`;
         }).join('')}
@@ -792,7 +792,7 @@ function openEdit(svc) {
   editTarget = svc.name;
   $('edIcon').src = svc.icon_override
     ? '/api/icon/' + encodeURIComponent(svc.name) + '?v=' + (svc.icon_ts || 0)
-    : 'https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/' + (svc.icon || svc.image_slug || 'none') + '.png';
+    : '/api/icache/' + (svc.icon || svc.image_slug || 'none') + '.png';
   $('edName').value = svc.display_name || '';
   $('edUrl').value = svc.url_override || '';
   $('edCat').value = svc.has_override && svc.category ? svc.category : '';
